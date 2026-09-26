@@ -1,0 +1,33 @@
+mncs 0.18;
+
+// mncs.control.plant.v1 — discrete first-order plant and its exact
+// open-loop behavior.
+//
+// x[k+1] = a*x[k] + b*u[k]. Coefficients are data, not validated:
+// unstable (|a| > 1), integrating (a == 1), and deadbeat (a == 0)
+// plants are all legitimate control problems. The closed-form
+// step-response helpers below are the independent comparators the
+// verification suite pins against the iterated simulation.
+
+module mncs.control.plant.v1;
+
+// One open-loop sample: the only dynamics in the foundation slice.
+fn plant_step(a: f64, b: f64, x: f64, u: f64) -> (result: f64) {
+    return a * x + b * u;
+}
+
+// Closed form after one step from x0 under constant u.
+fn step_once(a: f64, b: f64, x0: f64, u: f64) -> (result: f64) {
+    return a * x0 + b * u;
+}
+
+// Closed form after two steps from x0 under constant u.
+fn step_twice(a: f64, b: f64, x0: f64, u: f64) -> (result: f64) {
+    return a * step_once(a, b, x0, u) + b * u;
+}
+
+// DC equilibrium under constant u (exact only when a != 1; the
+// division is the caller's contract, stated beside the call).
+fn equilibrium(a: f64, b: f64, u: f64) -> (result: f64) {
+    return b * u / (1.0 - a);
+}

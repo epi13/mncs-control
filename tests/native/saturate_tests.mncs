@@ -1,0 +1,45 @@
+mncs 0.18;
+
+// Native contracts for saturation: limit validation, clamping values,
+// and explicit saturation reporting. All dyadic: exact `==`.
+
+module mncs.control.test.saturate.v1;
+
+use mncs.test.assertions;
+use mncs.test.suite;
+use mncs.control.saturate;
+
+test limits_validation() -> (result: TestResult) {
+    let ok: bool = limits_are_ok(check_limits(limits(-1.0, 1.0)));
+    let inverted: bool = match check_limits(limits(2.0, 1.0)) {
+        LimitsCheck.Ok => false,
+        LimitsCheck.Inverted => true,
+        LimitsCheck.Degenerate => false,
+    };
+    let degenerate: bool = match check_limits(limits(1.0, 1.0)) {
+        LimitsCheck.Ok => false,
+        LimitsCheck.Inverted => false,
+        LimitsCheck.Degenerate => true,
+    };
+    return from_assertion(equals_bool(true, ok && inverted && degenerate, 5101));
+}
+
+test clamp_values() -> (result: TestResult) {
+    let lim: Limits = limits(-1.0, 1.0);
+    let hi: bool = clamp_value(9.0, lim) == 1.0;
+    let lo: bool = clamp_value(-9.0, lim) == -1.0;
+    let inside: bool = clamp_value(0.5, lim) == 0.5;
+    let edge: bool = clamp_value(1.0, lim) == 1.0 && clamp_value(-1.0, lim) == -1.0;
+    return from_assertion(equals_bool(true, hi && lo && inside && edge, 5102));
+}
+
+test clamp_reports_saturation() -> (result: TestResult) {
+    let lim: Limits = limits(-1.0, 1.0);
+    let sat: bool = match clamp_report(9.0, lim) {
+        SatOut.Value { u, saturated } => u == 1.0 && saturated,
+    };
+    let free: bool = match clamp_report(0.25, lim) {
+        SatOut.Value { u, saturated } => u == 0.25 && saturated == false,
+    };
+    return from_assertion(equals_bool(true, sat && free, 5103));
+}

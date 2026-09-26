@@ -1,0 +1,120 @@
+mncs 0.18;
+
+// End-to-end closed-loop verification: P-only droop trajectory, PI
+// droop elimination, replay determinism, saturated boundedness, and
+// guard propagation. Plant a=0.5, b=0.5, dt=1 throughout; setpoint
+// r=4. All dyadic: exact `==`.
+
+module mncs.control.test.loop.v1;
+
+use mncs.test.assertions;
+use mncs.test.suite;
+use mncs.control.saturate;
+use mncs.control.pid;
+use mncs.control.loop;
+
+test p_only_droop_trajectory() -> (result: TestResult) {
+    // Kp=1: u0=4, y1=2, u1=2, y2=2 — settles at half the setpoint.
+    let g: PidGains = pid_gains(1.0, 0.0, 0.0);
+    let lim: Limits = limits(-100.0, 100.0);
+    let s0: LoopState = loop_state(0.0, pid_state(0.0, 0.0));
+    let first: bool = match loop_step(g, s0, 4.0, 1.0, lim, 0.5, 0.5) {
+        LoopOut.Value { after, u, y, saturated } => u == 4.0 && after.x == 2.0 && y == 0.0 && saturated == false,
+        LoopOut.BadDt => false,
+        LoopOut.BadLimits => false,
+    };
+    let s1: LoopState = step_state(g, s0, lim);
+    let second: bool = match loop_step(g, s1, 4.0, 1.0, lim, 0.5, 0.5) {
+        LoopOut.Value { after, u, y, saturated } => u == 2.0 && after.x == 2.0 && y == 2.0,
+        LoopOut.BadDt => false,
+        LoopOut.BadLimits => false,
+    };
+    return from_assertion(equals_bool(true, first && second, 5401));
+}
+
+fn step_state(g: PidGains, s: LoopState, lim: Limits) -> (result: LoopState) {
+    return match loop_step(g, s, 4.0, 1.0, lim, 0.5, 0.5) {
+        LoopOut.Value { after, u, y, saturated } => after,
+        LoopOut.BadDt => s,
+        LoopOut.BadLimits => s,
+    };
+}
+
+test pi_eliminates_droop() -> (result: TestResult) {
+    // Kp=1, Ki=0.5: u = 6, 3.5, 3.625, 3.71875 and
+    // y = 3, 3.25, 3.4375, 3.578125 — climbing toward r=4.
+    let g: PidGains = pid_gains(1.0, 0.5, 0.0);
+    let lim: Limits = limits(-100.0, 100.0);
+    let s0: LoopState = loop_state(0.0, pid_state(0.0, 0.0));
+    let s1: LoopState = step_pi(g, s0, lim);
+    let s2: LoopState = step_pi(g, s1, lim);
+    let s3: LoopState = step_pi(g, s2, lim);
+    let s4: LoopState = step_pi(g, s3, lim);
+    let rising: bool = s1.x == 3.0 && s2.x == 3.25 && s3.x == 3.4375 && s4.x == 3.578125;
+    let above_p: bool = s4.x > 2.0;
+    return from_assertion(equals_bool(true, rising && above_p, 5402));
+}
+
+fn step_pi(g: PidGains, s: LoopState, lim: Limits) -> (result: LoopState) {
+    return match loop_step(g, s, 4.0, 1.0, lim, 0.5, 0.5) {
+        LoopOut.Value { after, u, y, saturated } => after,
+        LoopOut.BadDt => s,
+        LoopOut.BadLimits => s,
+    };
+}
+
+test replay_is_deterministic() -> (result: TestResult) {
+    // Two identical 4-sample runs agree bit-for-bit: the replay contract.
+    let g: PidGains = pid_gains(1.0, 0.5, 0.25);
+    let lim: Limits = limits(-100.0, 100.0);
+    let s0: LoopState = loop_state(1.0, pid_state(0.5, 0.25));
+    iterate k up_to 4 carrying a: LoopState = s0 {
+        next a = step_pi(g, a, lim);
+    }
+    iterate k up_to 4 carrying b: LoopState = s0 {
+        next b = step_pi(g, b, lim);
+    }
+    let ok: bool = a.x == b.x && a.ctl.integ == b.ctl.integ && a.ctl.prev_err == b.ctl.prev_err;
+    return from_assertion(equals_bool(true, ok, 5403));
+}
+
+test saturated_loop_stays_bounded() -> (result: TestResult) {
+    // Aggressive Kp=8 with tight limits: every sample saturates and
+    // the state stays inside the authority envelope over 4 samples.
+    let g: PidGains = pid_gains(8.0, 0.0, 0.0);
+    let lim: Limits = limits(-1.0, 1.0);
+    let s0: LoopState = loop_state(0.0, pid_state(0.0, 0.0));
+    let s1: LoopState = step_sat(g, s0, lim);
+    let s2: LoopState = step_sat(g, s1, lim);
+    let bounded: bool = s1.x == 0.5 && s2.x == 0.75;
+    let clamped: bool = match loop_step(g, s0, 4.0, 1.0, lim, 0.5, 0.5) {
+        LoopOut.Value { after, u, y, saturated } => u == 1.0 && saturated,
+        LoopOut.BadDt => false,
+        LoopOut.BadLimits => false,
+    };
+    return from_assertion(equals_bool(true, bounded && clamped, 5404));
+}
+
+fn step_sat(g: PidGains, s: LoopState, lim: Limits) -> (result: LoopState) {
+    return match loop_step(g, s, 4.0, 1.0, lim, 0.5, 0.5) {
+        LoopOut.Value { after, u, y, saturated } => after,
+        LoopOut.BadDt => s,
+        LoopOut.BadLimits => s,
+    };
+}
+
+test loop_propagates_guards() -> (result: TestResult) {
+    let g: PidGains = pid_gains(1.0, 0.0, 0.0);
+    let s0: LoopState = loop_state(0.0, pid_state(0.0, 0.0));
+    let bad_dt: bool = match loop_step(g, s0, 4.0, 0.0, limits(-1.0, 1.0), 0.5, 0.5) {
+        LoopOut.Value { after, u, y, saturated } => u != u,
+        LoopOut.BadDt => true,
+        LoopOut.BadLimits => false,
+    };
+    let bad_lim: bool = match loop_step(g, s0, 4.0, 1.0, limits(1.0, 1.0), 0.5, 0.5) {
+        LoopOut.Value { after, u, y, saturated } => u != u,
+        LoopOut.BadDt => false,
+        LoopOut.BadLimits => true,
+    };
+    return from_assertion(equals_bool(true, bad_dt && bad_lim, 5405));
+}

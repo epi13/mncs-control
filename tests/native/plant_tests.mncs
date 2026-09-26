@@ -1,0 +1,45 @@
+mncs 0.18;
+
+// Native contracts for the discrete plant: iterated steps against the
+// closed-form comparators, DC equilibrium, and bounded unstable growth.
+// All dyadic: exact `==`.
+
+module mncs.control.test.plant.v1;
+
+use mncs.test.assertions;
+use mncs.test.suite;
+use mncs.control.plant;
+
+test open_loop_against_closed_form() -> (result: TestResult) {
+    // a=0.5, b=0.5, x0=1, u=3: x1 = 2, x2 = 2.5.
+    let x1: f64 = plant_step(0.5, 0.5, 1.0, 3.0);
+    let x2: f64 = plant_step(0.5, 0.5, x1, 3.0);
+    let ok: bool = x1 == step_once(0.5, 0.5, 1.0, 3.0) && x1 == 2.0;
+    let ok2: bool = x2 == step_twice(0.5, 0.5, 1.0, 3.0) && x2 == 2.5;
+    return from_assertion(equals_bool(true, ok && ok2, 5301));
+}
+
+test dc_equilibrium() -> (result: TestResult) {
+    // a=0.5, b=0.5, u=3: x* = 3, and stepping from x* holds it.
+    let xe: f64 = equilibrium(0.5, 0.5, 3.0);
+    let hold: bool = plant_step(0.5, 0.5, xe, 3.0) == xe;
+    return from_assertion(equals_bool(true, xe == 3.0 && hold, 5302));
+}
+
+test zero_input_decay() -> (result: TestResult) {
+    // Unforced stable plant halves its state every sample.
+    let x1: f64 = plant_step(0.5, 0.25, 4.0, 0.0);
+    let x2: f64 = plant_step(0.5, 0.25, x1, 0.0);
+    let ok: bool = x1 == 2.0 && x2 == 1.0;
+    return from_assertion(equals_bool(true, ok, 5303));
+}
+
+test unstable_growth_bounded_horizon() -> (result: TestResult) {
+    // a=2 doubles unforced: 1 -> 2 -> 4 -> 8 over three samples.
+    // Instability is data to observe, not a failure to trap.
+    let x1: f64 = plant_step(2.0, 0.5, 1.0, 0.0);
+    let x2: f64 = plant_step(2.0, 0.5, x1, 0.0);
+    let x3: f64 = plant_step(2.0, 0.5, x2, 0.0);
+    let ok: bool = x1 == 2.0 && x2 == 4.0 && x3 == 8.0;
+    return from_assertion(equals_bool(true, ok, 5304));
+}

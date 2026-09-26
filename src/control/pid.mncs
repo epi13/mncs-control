@@ -1,0 +1,53 @@
+mncs 0.18;
+
+// mncs.control.pid.v1 — discrete positional PID with guarded timing,
+// validated saturation, and conditional-integration anti-windup.
+//
+// One step: e = r - y; D = (e - prev)/dt (dt > 0 guarded, so the
+// division can never trap); I_trial = I + e*dt; raw = Kp*e + Ki*I +
+// Kd*D; u = clamp(raw). When saturated and the error would drive the
+// actuator further into saturation, the integrator freezes at its
+// previous value; otherwise the trial integral is accepted. The
+// `saturated` flag makes the windup decision replayable evidence
+// rather than hidden state.
+
+module mncs.control.pid.v1;
+
+use mncs.control.saturate;
+
+record PidGains { kp: f64, ki: f64, kd: f64 }
+
+fn pid_gains(kp: f64, ki: f64, kd: f64) -> (result: PidGains) {
+    return PidGains { kp: kp, ki: ki, kd: kd };
+}
+
+record PidState { integ: f64, prev_err: f64 }
+
+fn pid_state(integ: f64, prev_err: f64) -> (result: PidState) {
+    return PidState { integ: integ, prev_err: prev_err };
+}
+
+enum PidOut { Value { u: f64, state: PidState, saturated: bool }, BadDt, BadLimits }
+
+fn pid_step(g: PidGains, s: PidState, r: f64, y: f64, dt: f64, lim: Limits) -> (result: PidOut) {
+    if dt <= 0.0 {
+        return PidOut.BadDt;
+    }
+    return match check_limits(lim) {
+        LimitsCheck.Ok => pid_guarded(g, s, r, y, dt, lim),
+        LimitsCheck.Inverted => PidOut.BadLimits,
+        LimitsCheck.Degenerate => PidOut.BadLimits,
+    };
+}
+
+fn pid_guarded(g: PidGains, s: PidState, r: f64, y: f64, dt: f64, lim: Limits) -> (result: PidOut) {
+    let err: f64 = r - y;
+    let deriv: f64 = (err - s.prev_err) / dt;
+    let trial: f64 = s.integ + err * dt;
+    let raw: f64 = g.kp * err + g.ki * trial + g.kd * deriv;
+    let u: f64 = clamp_value(raw, lim);
+    let sat: bool = u != raw;
+    let frozen: bool = sat && err * raw > 0.0;
+    let kept: f64 = select(frozen, s.integ, trial);
+    return PidOut.Value { u: u, state: PidState { integ: kept, prev_err: err }, saturated: sat };
+}

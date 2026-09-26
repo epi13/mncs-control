@@ -1,0 +1,55 @@
+mncs 0.18;
+
+// mncs.control.saturate.v1 — actuator saturation as explicit semantics.
+//
+// Saturation is never incidental clipping: limits are validated data
+// (`Limits` requires lo < hi), clamping goes through the Numeric
+// total `fclamp`, and every clamped result reports whether it
+// saturated so callers (anti-windup, replay evidence) can observe it.
+// Control owns the saturation contract; scalar arithmetic stays in
+// Numeric and is never re-implemented here.
+
+module mncs.control.saturate.v1;
+
+use mncs.numerics.scalar_float;
+
+// Actuator authority interval. Units are the caller's (volts, newtons,
+// duty fraction); the interval must be strict (lo < hi).
+record Limits { lo: f64, hi: f64 }
+
+fn limits(lo: f64, hi: f64) -> (result: Limits) {
+    return Limits { lo: lo, hi: hi };
+}
+
+enum LimitsCheck { Ok, Inverted, Degenerate }
+
+fn check_limits(lim: Limits) -> (result: LimitsCheck) {
+    if lim.lo > lim.hi {
+        return LimitsCheck.Inverted;
+    }
+    if lim.lo == lim.hi {
+        return LimitsCheck.Degenerate;
+    }
+    return LimitsCheck.Ok;
+}
+
+fn limits_are_ok(c: LimitsCheck) -> (result: bool) {
+    return match c {
+        LimitsCheck.Ok => true,
+        LimitsCheck.Inverted => false,
+        LimitsCheck.Degenerate => false,
+    };
+}
+
+// Clamp into validated limits. Total on finite inputs past check_limits.
+fn clamp_value(v: f64, lim: Limits) -> (result: f64) {
+    return fclamp(v, lim.lo, lim.hi);
+}
+
+// Clamp outcome reporting saturation explicitly.
+enum SatOut { Value { u: f64, saturated: bool } }
+
+fn clamp_report(v: f64, lim: Limits) -> (result: SatOut) {
+    let u: f64 = fclamp(v, lim.lo, lim.hi);
+    return SatOut.Value { u: u, saturated: u != v };
+}

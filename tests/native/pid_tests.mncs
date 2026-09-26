@@ -1,0 +1,96 @@
+mncs 0.18;
+
+// Native contracts for the PID step: proportional action, integral
+// accumulation, derivative kick, saturation freeze, and timing/limit
+// guards. All values dyadic: exact `==`.
+
+module mncs.control.test.pid.v1;
+
+use mncs.test.assertions;
+use mncs.test.suite;
+use mncs.control.saturate;
+use mncs.control.pid;
+
+test proportional_step_exact() -> (result: TestResult) {
+    // Kp=1, r=4, y=0, dt=1: u = 4, no saturation, integral takes e*dt.
+    let g: PidGains = pid_gains(1.0, 0.0, 0.0);
+    let s: PidState = pid_state(0.0, 0.0);
+    let good: bool = match pid_step(g, s, 4.0, 0.0, 1.0, limits(-100.0, 100.0)) {
+        PidOut.Value { u, state, saturated } => u == 4.0 && state.integ == 4.0 && state.prev_err == 4.0 && saturated == false,
+        PidOut.BadDt => false,
+        PidOut.BadLimits => false,
+    };
+    return from_assertion(equals_bool(true, good, 5201));
+}
+
+test integral_accumulates() -> (result: TestResult) {
+    // Ki=0.5, constant error 2 over dt=1: I = 2, u = 1.
+    let g: PidGains = pid_gains(0.0, 0.5, 0.0);
+    let s: PidState = pid_state(0.0, 0.0);
+    let good: bool = match pid_step(g, s, 2.0, 0.0, 1.0, limits(-100.0, 100.0)) {
+        PidOut.Value { u, state, saturated } => u == 1.0 && state.integ == 2.0,
+        PidOut.BadDt => false,
+        PidOut.BadLimits => false,
+    };
+    return from_assertion(equals_bool(true, good, 5202));
+}
+
+test derivative_kick_exact() -> (result: TestResult) {
+    // Kd=2, error steps 4 -> 2 across dt=1: D = -2, u = -4.
+    let g: PidGains = pid_gains(0.0, 0.0, 2.0);
+    let s: PidState = pid_state(0.0, 4.0);
+    let good: bool = match pid_step(g, s, 2.0, 0.0, 1.0, limits(-100.0, 100.0)) {
+        PidOut.Value { u, state, saturated } => u == -4.0 && state.prev_err == 2.0,
+        PidOut.BadDt => false,
+        PidOut.BadLimits => false,
+    };
+    return from_assertion(equals_bool(true, good, 5203));
+}
+
+test saturation_freezes_integrator() -> (result: TestResult) {
+    // Ki-only at integ=5, error +4, limits [-1,1]: raw = 9 clamps to
+    // 1 and the integral stays 5 (error drives into saturation).
+    let g: PidGains = pid_gains(0.0, 1.0, 0.0);
+    let s: PidState = pid_state(5.0, 0.0);
+    let good: bool = match pid_step(g, s, 4.0, 0.0, 1.0, limits(-1.0, 1.0)) {
+        PidOut.Value { u, state, saturated } => u == 1.0 && saturated && state.integ == 5.0,
+        PidOut.BadDt => false,
+        PidOut.BadLimits => false,
+    };
+    return from_assertion(equals_bool(true, good, 5204));
+}
+
+test desaturating_error_releases_integrator() -> (result: TestResult) {
+    // Same saturation, but error now opposes it (r below y): raw = 5
+    // still clamps to 1, yet the trial integral (9 - 4 = 5) is
+    // accepted because the error drives away from saturation.
+    let g: PidGains = pid_gains(0.0, 1.0, 0.0);
+    let s: PidState = pid_state(9.0, 0.0);
+    let good: bool = match pid_step(g, s, -4.0, 0.0, 1.0, limits(-1.0, 1.0)) {
+        PidOut.Value { u, state, saturated } => u == 1.0 && saturated && state.integ == 5.0,
+        PidOut.BadDt => false,
+        PidOut.BadLimits => false,
+    };
+    return from_assertion(equals_bool(true, good, 5205));
+}
+
+test guards_reject_bad_timing_and_limits() -> (result: TestResult) {
+    let g: PidGains = pid_gains(1.0, 0.0, 0.0);
+    let s: PidState = pid_state(0.0, 0.0);
+    let bad_dt: bool = match pid_step(g, s, 1.0, 0.0, 0.0, limits(-1.0, 1.0)) {
+        PidOut.Value { u, state, saturated } => u != u,
+        PidOut.BadDt => true,
+        PidOut.BadLimits => false,
+    };
+    let neg_dt: bool = match pid_step(g, s, 1.0, 0.0, 0.0 - 1.0, limits(-1.0, 1.0)) {
+        PidOut.Value { u, state, saturated } => u != u,
+        PidOut.BadDt => true,
+        PidOut.BadLimits => false,
+    };
+    let bad_lim: bool = match pid_step(g, s, 1.0, 0.0, 1.0, limits(2.0, 1.0)) {
+        PidOut.Value { u, state, saturated } => u != u,
+        PidOut.BadDt => false,
+        PidOut.BadLimits => true,
+    };
+    return from_assertion(equals_bool(true, bad_dt && neg_dt && bad_lim, 5206));
+}

@@ -1,0 +1,45 @@
+mncs 0.18;
+
+// mncs.control.loop.v1 — fixed-rate closed loop: plant plus controller
+// as one deterministic sample.
+//
+// One sample: measure y = x (full-state measurement; output maps and
+// estimators are later layers, not hidden inside this step), run the
+// guarded PID step, advance the plant. Timing (dt) is carried data,
+// not a wall-clock read: the real-time contract is "every sample does
+// this bounded work", while clocks/deadline enforcement stay host
+// concerns behind typed adapters (pressure C-002). Replay falls out
+// of determinism: identical (gains, state, setpoint, dt, limits,
+// plant) reproduces the trajectory bit-for-bit.
+
+module mncs.control.loop.v1;
+
+use mncs.control.saturate;
+use mncs.control.pid;
+use mncs.control.plant;
+
+// Full closed-loop state: plant state plus controller state.
+record LoopState { x: f64, ctl: PidState }
+
+fn loop_state(x: f64, ctl: PidState) -> (result: LoopState) {
+    return LoopState { x: x, ctl: ctl };
+}
+
+enum LoopOut {
+    Value { after: LoopState, u: f64, y: f64, saturated: bool },
+    BadDt,
+    BadLimits,
+}
+
+fn loop_step(g: PidGains, s: LoopState, r: f64, dt: f64, lim: Limits, a: f64, b: f64) -> (result: LoopOut) {
+    return match pid_step(g, s.ctl, r, s.x, dt, lim) {
+        PidOut.Value { u, state, saturated } => advance_loop(s, state, u, saturated, a, b),
+        PidOut.BadDt => LoopOut.BadDt,
+        PidOut.BadLimits => LoopOut.BadLimits,
+    };
+}
+
+fn advance_loop(s: LoopState, ctl: PidState, u: f64, saturated: bool, a: f64, b: f64) -> (result: LoopOut) {
+    let x2: f64 = plant_step(a, b, s.x, u);
+    return LoopOut.Value { after: LoopState { x: x2, ctl: ctl }, u: u, y: s.x, saturated: saturated };
+}
