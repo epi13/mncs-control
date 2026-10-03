@@ -1,0 +1,17 @@
+{
+  "schema_version": "mncs.project-intent/1",
+  "purpose": "Machine-native control and dynamical-systems infrastructure for MNCS: discrete controllers, plant models, saturation semantics, fixed-rate loop execution, and replayable verification, expressed natively in mncs-language.",
+  "entry": [
+    "python3 scripts/run_tests.py"
+  ],
+  "milestones": [
+    {
+      "id": "mncs-control:projection-conformance",
+      "title": "Declared ambient projection surfaces satisfy their contract",
+      "subject_slot": "declarations",
+      "evidence": "projection-conformance",
+      "dependencies": [],
+      "blockers": []
+    }
+  ]
+}
