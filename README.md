@@ -1,6 +1,19 @@
 # mncs-control
 
 <!-- MNCS:generated:begin -->
+## Project entry
+
+Machine-native control and dynamical-systems infrastructure for MNCS: discrete controllers, plant models, saturation semantics, fixed-rate loop execution, and replayable verification, expressed natively in mncs-language.
+
+```bash
+python3 scripts/run_tests.py
+```
+
+Declared capabilities (declarations do not establish execution health):
+
+- `feedback-control/0.1` — mncs-library (experimental)
+
+Semantic sources and ownership: `.mncs/projections.json`.
 <!-- MNCS:generated:end -->
 
 Machine-native control and dynamical-systems infrastructure for MNCS.
