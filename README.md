@@ -1,5 +1,8 @@
 # mncs-control
 
+<!-- MNCS:generated:begin -->
+<!-- MNCS:generated:end -->
+
 Machine-native control and dynamical-systems infrastructure for MNCS.
 
 `mncs-control` is the canonical home of **feedback-control
